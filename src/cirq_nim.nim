@@ -96,6 +96,14 @@ proc cirq_X*(cirq_q: var cirq_conn, name: string) =
     raise newException(Exception, problem)
   let instruction: string = "NOT_" & name
   cirq_q.inst.add(instruction)
+# Magic cirq_X**num
+proc cirq_X*(cirq_q: var cirq_conn, name: string, mult: float) =
+  if name notin cirq_q.qubits:
+    let problem = "The qubit was not declaired: " & name
+    raise newException(Exception, problem)
+  let instruction:string = "MAGICNOT_" & name & "_" & $mult
+  cirq_q.inst.add(instruction)
+
 
 # The Y rotation pauli matrix 
 proc cirq_Y*(cirq_q: var cirq_conn, name: string) =
@@ -109,8 +117,15 @@ proc cirq_Y*(cirq_q: var cirq_conn, name: string) =
   ]#
   let instruction: string = "YROT_" & name
   cirq_q.inst.add(instruction)
+# Magic cirq_Y**num
+proc cirq_Y*(cirq_q: var cirq_conn, name: string, mult: float) =
+  if name notin cirq_q.qubits:
+    let problem = "the qubit was not declaired: " & name
+    raise newException(Exception, problem)
+  let instruction:string = "MAGICYROT_" & name & "_" & $mult
+  cirq_q.inst.add(instruction)
 
-# 
+# Z Rotation Pauli matrix
 proc cirq_Z*(cirq_q: var cirq_conn, name: string) =
     if name notin cirq_q.qubits:
       let problem = "The qubit was not declaired: " & name
@@ -122,6 +137,14 @@ proc cirq_Z*(cirq_q: var cirq_conn, name: string) =
       ]#
     let instruction: string = "ZROT_" & name
     cirq_q.inst.add(instruction)
+# Magic Z ROT
+proc cirq_Z*(cirq_q: var cirq_conn, name: string, mult: float) =
+  if name notin cirq_q.qubits:
+    let problem = "the qubit was not declaired: " & name
+    raise newException(Exception, problem)
+  let instruction:string = "MAGICZROT_" & name & "_" & $mult
+  cirq_q.inst.add(instruction)
+
 
 # Function to add a mesure to list of instruction
 # I could make this take var args so we can save space setting up circuits
@@ -131,6 +154,9 @@ proc cirq_Measure*(cirq_q: var cirq_conn, name: string) =
     raise newException(Exception, problem)
   let instruction: string = "MEASURE_" & name
   cirq_q.inst.add(instruction)
+
+
+# Two Qubit Operators
 
 # CNOT Function takes two qubits 
 proc cirq_CNOT*(cirq_q: var cirq_conn, name1, name2 :string) =
@@ -148,6 +174,14 @@ proc cirq_SWAP*(cirq_q: var cirq_conn, name1, name2: string) =
     let problem = "The qubit was not declaired: " & name1
     raise newException(Exception, problem)
   let instruction: string = "SWAP_" & name1 & "_" & name2
+  cirq_q.inst.add(instruction)
+
+# Controlled Z
+proc cirq_CZ*(cirq_q: var cirq_conn, name1, name2: string) =
+  if name1 notin cirq_q.qubits:
+    let problem = "The qubit was not declaired: " & name1
+    raise newException(Exception, problem)
+  let instruction: string = "CZ_" & name1 & "_" & name2
   cirq_q.inst.add(instruction)
 
 # Function to construct the operators
@@ -178,6 +212,14 @@ proc cirq_constructopts(cirq_q: var cirq_conn) =
       cirq_q.opts.add("cirq.Z(" & splited[1] & ")") # still need to add the function for swap
     of "SWAP":
       cirq_q.opts.add("cirq.SWAP(" & splited[1] & "," & splited[2] & ")")
+    of "CZ":
+      cirq_q.opts.add("cirq.CZ(" & splited[1] & "," & splited[2] & ")")
+    of "MAGICNOT":
+      cirq_q.opts.add("cirq.X(" & splited[1] & ")" & "**" & splited[2])
+    of "MAGICYROT":
+      cirq_q.opts.add("cirq.Y(" & splited[1] & ")" & "**" & splited[2])
+    of "MAGICZROT":
+      cirq_q.opts.add("cirq.Z(" & splited[1] & ")" & "**" & splited[2])
     else:
       discard # Nothing to do
 
@@ -232,7 +274,7 @@ proc cirq_simulatestaticResults*(cirq_q: var cirq_conn, times: int): string =
   # if i use static exec to write to file i will lock out windows and Mac users and have to use building in cmds from those OS (as well as determine the os -> which i belive nim has built ins for at the runtime as well)
   #var file = open("staticcirqnim.staticcirqnim")
   #file.write(results)
-  # Need to detect platform when using these but rn this is okay for testing
+  # Need to detect platform when using these but rn this is okay for testing, or better yet find another solution
   discard staticExec("echo \"" & results & "\" > staticcirqnim.staticcirqnim")
 
   cirq_q.resultant = results
@@ -248,12 +290,31 @@ proc cirq_getStaticResults*(): string =
     # removeFile("staticcirqnim.staticcirqnim")
     result = contents
 
+proc cirq_BlochResults*(cirq_q: var cirq_conn, names: varargs[string]):string =
+  # This function targets an ammount of arguments to get their bloch sphere results
+  let call: string = "python -c \'" & cirq_constructPy(cirq_q) & "simulator = cirq.Simulator()\nbloch = simulator.simulate(circuit)\n"
+  var buildCall: string = ""
+  for x in names:
+    # Build up the call to python
+    buildCall = buildCall & "print(\"Bloch sphere of " & x & ":\\n\")\n"
+    buildCall = buildCall & "b" & x & "X, b" & x & "Y, b" & x & "Z = cirq.bloch_vector_from_state_vector(bloch.final_state_vector, " & $cirq_q.qubits.find(x) & ")\nprint(\"x: \", round(b" & x & "X, 4),\n\"y: \", round(b" & x & "Y, 4),\n\"z: \", round(b" & x & "Z, 4))\n"
+  buildCall = buildCall & "\'"
+  let (results, exitcode) = execCmdEx(call & buildCall) # this osproc calls also may include some issues for {.compileTime.} as importc is used and thats a FFI function which is not available at CT 
+  if exitcode == 1:
+    let problem = "The circuit had a problem running:\n" & results
+    raise newException(Exception, problem)
+  cirq_q.resultant = results # Set resultant to recent results
+  result = results
+ # let call: string = 
 
 proc cirq_simulateResults*(cirq_q: var cirq_conn, times: int): string =
   # First set up the instruction remember current instructions
   # I hate how this is done
   let call: string = "python -c \'" & cirq_constructPy(cirq_q) & "simulator = cirq.Simulator()\nresults=simulator.run(circuit,repetitions=" & $times & ")\nprint(results)\n\'"
-  let (results, _) = execCmdEx(call) # this osproc calls also may include some issues for {.compileTime.} as importc is used and thats a FFI function which is not available at CT 
+  let (results, exitcode) = execCmdEx(call) # this osproc calls also may include some issues for {.compileTime.} as importc is used and thats a FFI function which is not available at CT 
+  if exitcode == 1:
+    let problem = "The circuit had a problem running:\n" & results
+    raise newException(Exception, problem)
   cirq_q.resultant = results # Set resultant to recent results
   result = results
 
@@ -319,7 +380,8 @@ Circuit circuit: # name of circuit
   -> decomposes to: circuit.cirq_createQbit("a") and so on
 ]#
 # Macro system
-macro Circuit*(typeName: typed, fieldsof: untyped): untyped =
+# Next version I want this macro to call sub-helper macros to make the code-generation cleaner
+macro Circuit*(typeName: typed,  fieldsof: untyped): untyped =
   # Currently this marcos are for quickly desiging and setting up circuits there are not interiely complete or implemented so just as everythign here have fun feel freee to mess with it and use with caution
   result = newStmtList()
   for call in fieldsof:
@@ -348,31 +410,101 @@ macro Circuit*(typeName: typed, fieldsof: untyped): untyped =
       ))
     # NOT GATES
     elif $call[0] == "X":
-      result.add(newCall(
-        newDotExpr(
-          newIdentNode(typeName.strVal),
-          newIdentNode("cirq_X")
-        ),
-        newStrLitNode($call[1])
-      ))
+      # Here I need to add support for the 'magic' calls of python for things like cirq_X(qubit)**0.5 -> squareroot of a gate
+      #for subcall in call[1]:
+      #  echo call[1][1].floatVal
+      # check if the type of call[1] is of type command
+      if call[1].kind == nnkCommand:
+        # Here we can address python ** magic
+        # Overload the cirq_X proc
+        # Need to get the FloatLitVal as it can be passed as an identitfer arg or a floatval directly
+        # I could use var x:float and use this to convert the value to floatLit or just have two expansions and since its in compile time Im going to do the long code
+        if call[1][1].kind == nnkFloatLit:
+          #echo "float addressed"
+          result.add(newCall(
+            newDotExpr(
+              newIdentNode(typeName.strVal),
+              newIdentNode("cirq_X")
+            ),
+            newStrLitNode(call[1][0].strVal),
+            newFloatLitNode(call[1][1].floatVal)
+          ))
+        else: # it is an ident and needs to be converted to a float
+          result.add(newCall(
+            newDotExpr(
+              newIdentNode(typeName.strVal),
+              newIdentNode("cirq_X")
+            ),
+            newStrLitNode(call[1][0].strVal),
+            newIdentNode(call[1][1].strVal) # Make it an Ident node insteads as its passed as a var
+          ))
+          #circuitHelper(result, call[1][1])
+      else:
+        result.add(newCall(
+          newDotExpr(
+            newIdentNode(typeName.strVal),
+            newIdentNode("cirq_X")
+          ),
+          newStrLitNode($call[1])
+        ))
     # Y rotation
     elif $call[0] == "Y":
-      result.add(newCall(
-        newDotExpr(
-          newIdentNode(typeName.strVal),
-          newIdentNode("cirq_Y")
-        ),
-        newStrLitNode($call[1])
-      ))
+      if call[1].kind == nnkCommand:
+        if call[1][1].kind == nnkFloatLit:
+          result.add(newCall(
+            newDotExpr(
+              newIdentNode(typeName.strVal),
+              newIdentNode("cirq_Y")
+            ),
+            newStrLitNode(call[1][0].strVal),
+            newFloatLitNode(call[1][1].floatVal)
+          ))
+        else:
+          result.add(newCall(
+            newDotExpr(
+              newIdentNode(typeName.strVal),
+              newIdentNode("cirq_Y")
+            ),
+            newStrLitNode(call[1][0].strVal),
+            newIdentNode(call[1][1].strVal) # Make it an Ident node insteads as its passed as a var
+          ))
+      else:
+        result.add(newCall(
+          newDotExpr(
+            newIdentNode(typeName.strVal),
+            newIdentNode("cirq_Y")
+          ),
+          newStrLitNode($call[1])
+        ))
     # 180 rotation Z 
     elif $call[0] == "Z":
-      result.add(newCall(
-        newDotExpr(
-          newIdentNode(typeName.strVal),
-          newIdentNode("cirq_Z")
-        ),
-        newStrLitNode($call[1])
-      ))
+      if call[1].kind == nnkCommand:
+        if call[1][1].kind == nnkFloatLit:
+          result.add(newCall(
+            newDotExpr(
+              newIdentNode(typeName.strVal),
+              newIdentNode("cirq_Z")
+            ),
+            newStrLitNode(call[1][0].strVal),
+            newFloatLitNode(call[1][1].floatVal)
+          ))
+        else:
+          result.add(newCall(
+            newDotExpr(
+              newIdentNode(typeName.strVal),
+              newIdentNode("cirq_Z")
+            ),
+            newStrLitNode(call[1][0].strVal),
+            newIdentNode(call[1][1].strVal) # Make it an Ident node insteads as its passed as a var
+          ))        
+      else:
+        result.add(newCall(
+          newDotExpr(
+            newIdentNode(typeName.strVal),
+            newIdentNode("cirq_Z") 
+          ),
+          newStrLitNode($call[1])
+        ))
     # Controllled nots
     elif $call[0] == "CNOT":
       # Then this is a nested command structure
@@ -399,6 +531,15 @@ macro Circuit*(typeName: typed, fieldsof: untyped): untyped =
         newStrLitNode($call[1][0].strVal),
         newStrLitNode($call[1][1].strVal)
       ))
+    elif $call[0] == "CZ":
+      result.add(newCall(
+        newDotExpr(
+          newIdentNode(typeName.strVal),
+          newIdentNode("cirq_CZ")
+        ),
+        newStrLitNode($call[1][0].strVal),
+        newStrLitNode($call[1][1].strVal)
+      ))
     # Measure Gate
     elif $call[0] == "Measure":
       result.add(newCall(
@@ -408,6 +549,11 @@ macro Circuit*(typeName: typed, fieldsof: untyped): untyped =
         ),
         newStrLitNode($call[1])
       ))
-
-
-
+    #[ I want to avoid this syntax but I am not good enough with macros yet
+    elif $call[0] == "Bloch":
+      # We are doing a possible multiple bloch call
+      results.add(newCall())
+      for index, subcall in call:
+        if not index == 0:
+          # Then its the call and we need to add the Bloch results call
+    ]#
