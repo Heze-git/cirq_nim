@@ -24,6 +24,7 @@ type
     inst: seq[string] # sequence of instructions to be called
     opts: seq[string] # this is the completed opt string from the opts
     qubits: seq[string] # sequence of active qubits
+    # Maybe I should make a qubit opts seq
     # resultant: string # the result value of operations get stored here
     resultant: string 
     # Possible fields: password, username, connect_info, compile target (qiskit)
@@ -32,7 +33,7 @@ type
 proc cirq_getResultant(cirq_q: var cirq_conn): string = 
   result = cirq_q.resultant
 # Constructor for the circuit
-proc initcirq*(): cirq_conn {.compileTime.}=
+proc initcirq*(): cirq_conn {.compileTime.} =
   result.inst = @[]
   result.opts = @[]
   result.qubits = @[]
@@ -68,6 +69,7 @@ proc cirq_createQbit*(cirq_q: var cirq_conn, name: string) =
   if $name[0] == "0" or $name[0] == "1" or $name[0] == "2" or $name[0] == "3" or $name[0] == "4" or $name[0] == "5" or $name[0] == "6" or $name[0] == "7" or $name[0] == "8" or $name[0] == "9":
     let problem = "This name cannot be used as it starts with a number: " & name
     raise newException(Exception, problem)
+  cirq_q.qubits.add("_namedopt_" & name)
   cirq_q.qubits.add(name)
   # I also should check for invalid naming schemes like starting with a number
   # Using prefix checking during the python code generation, this may be reworked in the future as right now this is a proof of concept
@@ -78,6 +80,45 @@ proc cirq_createQbit*(cirq_q: var cirq_conn, name: string) =
 # This currentl supports named qubits creation but cirq supports LineQubit(<num>) (x, y , z = LineQubit.range(3)) and GridQubit(<num>, <num>) (with specialties like GridQubit.square(<num>))
 # Also there are prepackaged assortmants of qubits
 
+
+# Create line of qubits function under a general name
+proc cirq_createQbitLine*(cirq_q: var cirq_conn, name: string, number: int) =
+  if name in cirq_q.qubits:
+    let problem = "The qubit was already set under the name: " & name
+    raise newException(Exception,problem)
+  if name.contains "_":
+    let problem = "The qubit name cannot contain \"_\": " & name
+    raise newException(Exception,problem)
+  if name == "ops":
+    let problem = "This word is reserved for the circuit creation: " & name
+    raise newException(Exception, problem)
+  if $name[0] == "0" or $name[0] == "1" or $name[0] == "2" or $name[0] == "3" or $name[0] == "4" or $name[0] == "5" or $name[0] == "6" or $name[0] == "7" or $name[0] == "8" or $name[0] == "9":
+    let problem = "This name cannot be used as it starts with a number: " & name
+    raise newException(Exception, problem)
+  # Declare the next will be a grid opt
+  cirq_q.qubits.add("_lineopt_" & name & "_" & $number)
+  for i in 0..number:
+    cirq_q.qubits.add(name & $i)
+
+# Create line of qubits function under a general name
+proc cirq_createQbitGrid*(cirq_q: var cirq_conn, name: string, rows, cols: int) =
+  if name in cirq_q.qubits:
+    let problem = "The qubit was already set under the name: " & name
+    raise newException(Exception,problem)
+  if name.contains "_":
+    let problem = "The qubit name cannot contain \"_\": " & name
+    raise newException(Exception,problem)
+  if name == "ops":
+    let problem = "This word is reserved for the circuit creation: " & name
+    raise newException(Exception, problem)
+  if $name[0] == "0" or $name[0] == "1" or $name[0] == "2" or $name[0] == "3" or $name[0] == "4" or $name[0] == "5" or $name[0] == "6" or $name[0] == "7" or $name[0] == "8" or $name[0] == "9":
+    let problem = "This name cannot be used as it starts with a number: " & name
+    raise newException(Exception, problem)
+  cirq_q.qubits.add("_gridopt_" & name & "_" & $rows & "_" & $cols) # declair that a gridopt will be happening next
+  # Add the list of qubits so that the runtime check for names is happy
+  for row in 0..rows:
+    for col in 0..cols:
+      cirq_q.qubits.add(name & $row & "x" & $col)
 
 
 # Prepare operation function on a qubit
@@ -169,11 +210,33 @@ proc cirq_CNOT*(cirq_q: var cirq_conn, name1, name2 :string) =
   let instruction: string = "CNOT_" & name1 & "_" & name2
   cirq_q.inst.add(instruction)
 
+# Magic CNOT
+proc cirq_CNOT*(cirq_q: var cirq_conn, name1, name2:string, mult:float) =
+  if name1 notin cirq_q.qubits:
+    let problem = "The qubit was not declaired: " & name1
+    raise newException(Exception, problem)
+  if name2 notin cirq_q.qubits:
+      let problem = "The qubit was not declaired: " & name2
+      raise newException(Exception, problem)
+  let instruction: string = "MAGICCNOT_" & name1 & "_" & name2 & "_" & $mult
+  cirq_q.inst.add(instruction)
+
 proc cirq_SWAP*(cirq_q: var cirq_conn, name1, name2: string) =
   if name1 notin cirq_q.qubits:
     let problem = "The qubit was not declaired: " & name1
     raise newException(Exception, problem)
   let instruction: string = "SWAP_" & name1 & "_" & name2
+  cirq_q.inst.add(instruction)
+
+# Magic Swap
+proc cirq_SWAP*(cirq_q: var cirq_conn, name1, name2:string, mult:float) =
+  if name1 notin cirq_q.qubits:
+    let problem = "The qubit was not declaired: " & name1
+    raise newException(Exception, problem)
+  if name2 notin cirq_q.qubits:
+    let problem = "The qubit was not declaired: " & name2
+    raise newException(Exception, problem)
+  let instruction: string = "MAGICSWAP_" & name1 & "_" & name2 & "_" & $mult
   cirq_q.inst.add(instruction)
 
 # Controlled Z
@@ -183,6 +246,19 @@ proc cirq_CZ*(cirq_q: var cirq_conn, name1, name2: string) =
     raise newException(Exception, problem)
   let instruction: string = "CZ_" & name1 & "_" & name2
   cirq_q.inst.add(instruction)
+
+# Magic CZ
+proc cirq_CZ*(cirq_q: var cirq_conn, name1, name2:string, mult:float) =
+  if name1 notin cirq_q.qubits:
+    let problem = "The qubit was not declaired: " & name1
+    raise newException(Exception, problem)
+  if name2 notin cirq_q.qubits:
+    let problem = "The qubit was not declaired: " & name2
+    raise newException(Exception, problem)
+  let instruction: string = "MAGICCZ_" & name1 & "_" & name2 & "_" & $mult
+  cirq_q.inst.add(instruction)
+
+
 
 # Function to construct the operators
 # I could make this a silent operation after the operators are updated 
@@ -202,8 +278,9 @@ proc cirq_constructopts(cirq_q: var cirq_conn) =
       cirq_q.opts.add("cirq.H(" & splited[1] & ")")
     # Mesure criteria
     of "MEASURE":
-      # cirq_q.opts.add("cirq.measure(" & splited[1] & ", key =\'m\')"
-      cirq_q.opts.add("cirq.measure(" & splited[1] & ")")
+      #cirq_q.opts.add("cirq.measure(" & splited[1] & ")")
+      # For the support of grid and line qubits
+      cirq_q.opts.add("cirq.measure(" & splited[1] & ", key =\"" & splited[1] & "\")")
     of "CNOT":
       cirq_q.opts.add("cirq.CNOT(" & splited[1] & "," & splited[2] & ")")
     of "YROT":
@@ -220,6 +297,12 @@ proc cirq_constructopts(cirq_q: var cirq_conn) =
       cirq_q.opts.add("cirq.Y(" & splited[1] & ")" & "**" & splited[2])
     of "MAGICZROT":
       cirq_q.opts.add("cirq.Z(" & splited[1] & ")" & "**" & splited[2])
+    of "MAGICCNOT":
+      cirq_q.opts.add("cirq.CNOT(" & splited[1] & "," & splited[2] & ")**" & splited[3])
+    of "MAGICSWAP":
+      cirq_q.opts.add("cirq.SWAP(" & splited[1] & "," & splited[2] & ")**" & splited[3])
+    of "MAGICCZ":
+      cirq_q.opts.add("cirq.CZ(" & splited[1] & "," & splited[2] & ")**" & splited[3])
     else:
       discard # Nothing to do
 
@@ -233,14 +316,32 @@ proc cirq_constructPy(cirq_q: var cirq_conn): string  =
   var code: string = "from importlib import abc\nimport cirq\n" # starts with a import cirq statement
   var fillopt: string = "ops = ["
   # I was going to go out of my way and generate a name but thats for a later version
+  # Now the logic here will get more complicated because I have to check for previous instruction being a "_gridopt_" or "_lineopt_" its kinda lazy but easy
   for qubit in cirq_q.qubits:
-    # Defines a list of qubit refrences 
-    let refrence = qubit & " = " & "cirq.NamedQubit(\"" & qubit & "\")\n"
-    # Expand the code generated
-    code = code & refrence
+    # Defines a list of qubit refrences
+    let splited = qubit.split('_') # using the standard _ as a delimiter
+    var refrence: string = ""
+    if splited.len >= 2: # Then we create a qubit
+       case splited[1]
+       of "gridopt": # splited[2] = name, splited[3] = rows, splited[4] = cols
+                     # Generate the gridconstruct here
+         let rows:int = parseInt(splited[3])
+         let cols:int = parseInt(splited[4])
+         for row in 0..rows:
+           for col in 0..cols:
+             refrence = refrence & splited[2] & $row & "x" & $col & " = " & "cirq.GridQubit(" & $row & "," & $col & ")\n"
+       of "lineopt":
+         # Generate the Line construct here
+         let line:int = parseInt(splited[3]) # splited[2] = name, splited[3] = number
+         for i in 0..line:
+           refrence = refrence & splited[2] & $i & " = " & "cirq.LineQubit(" & $i & ")\n"
+       of "namedopt": # splited[1] = nameopt, splited[2] = name
+         refrence = splited[2] & " = " & "cirq.NamedQubit(\"" & splited[2] & "\")\n"
+         # Expand the code generated
+       code = code & refrence
   for opt in cirq_q.opts:
     fillopt.add(opt & ",")
-  # Once this for loop ends we must close fillopt as it ends int
+    # Once this for loop ends we must close fillopt as it ends int
   try:
     fillopt.delete(len(fillopt)-1,len(fillopt))
   except:
@@ -276,7 +377,6 @@ proc cirq_simulatestaticResults*(cirq_q: var cirq_conn, times: int): string =
   #file.write(results)
   # Need to detect platform when using these but rn this is okay for testing, or better yet find another solution
   discard staticExec("echo \"" & results & "\" > staticcirqnim.staticcirqnim")
-
   cirq_q.resultant = results
   result = results
 
@@ -337,6 +437,9 @@ proc cirq_targetResults*(cirq_q: var cirq_conn, name: string):string  =
     line.removePrefix(prefix)
     result = line
 
+
+
+
 # Function to extract precompiled targeted results
 proc cirq_extractResults*(fromresult, name: string):string  = 
   let position: int = find(fromresult, name)
@@ -380,6 +483,7 @@ Circuit circuit: # name of circuit
   -> decomposes to: circuit.cirq_createQbit("a") and so on
 ]#
 # Macro system
+# Added new feature to treate backticked ` ` things literaly as ident
 # Next version I want this macro to call sub-helper macros to make the code-generation cleaner
 macro Circuit*(typeName: typed,  fieldsof: untyped): untyped =
   # Currently this marcos are for quickly desiging and setting up circuits there are not interiely complete or implemented so just as everythign here have fun feel freee to mess with it and use with caution
@@ -393,71 +497,318 @@ macro Circuit*(typeName: typed,  fieldsof: untyped): untyped =
     # Macro creates a qubit
     if $call[0] == "qubit":
       # add a new qubit create call
-      result.add(newCall(
-        newDotExpr(
-          newIdentNode(typeName.strVal),
-          newIdentNode("cirq_createQbit")
-        ),
-       newStrLitNode($call[1])))
+      if call[1].kind == nnkAccQuoted:
+        result.add(newCall(
+          newDotExpr(
+            newIdentNode(typeName.strVal),
+            newIdentNode("cirq_createQbit")
+          ),
+          newIdentNode($call[1])))
+      else:
+        result.add(newCall(
+          newDotExpr(
+            newIdentNode(typeName.strVal),
+            newIdentNode("cirq_createQbit")
+          ),
+          newStrLitNode($call[1])))
+    # Suport line qubits
+    elif $call[0] == "line":
+      if call[1][0].kind == nnkAccQuoted:
+        if call[1][1].kind == nnkIntLit:
+          result.add(newCall(
+            newDotExpr(
+              newIdentNode(typeName.strVal),
+              newIdentNode("cirq_createQbitLine")
+            ),
+            newIdentNode(call[1][0][0].strVal),
+            newIntLitNode(call[1][1].intVal)
+          ))
+        else:
+          result.add(newCall(
+            newDotExpr(
+              newIdentNode(typeName.strVal),
+              newIdentNode("cirq_createQbitLine")
+            ),
+            newIdentNode(call[1][0][0].strVal),
+            newIdentNode(call[1][1].strVal)
+          ))
+      else:
+        if call[1][1].kind == nnkIntLit:
+          result.add(newCall(
+            newDotExpr(
+              newIdentNode(typeName.strVal),
+              newIdentNode("cirq_createQbitLine")
+            ),
+            newStrLitNode(call[1][0].strVal),
+            newIntLitNode(call[1][1].intVal)
+          ))
+        else:
+          result.add(newCall(
+            newDotExpr(
+              newIdentNode(typeName.strVal),
+              newIdentNode("cirq_createQbitLine")
+            ),
+            newStrLitNode(call[1][0].strVal),
+            newIdentNode(call[1][1].strVal)
+          ))
+    # gridqubit support
+    elif $call[0] == "grid":
+      #[
+      This will have a couple of cases because the first or second row/col can be a IdentNode or a intlitnode which is 2x2 or 4 cases
+      call[1][0] = name
+      call[1][1][0] = row (intVal)
+      call[1][1][1] = col (intVal)
+      ]#
+      if call[1][0].kind == nnkAccQuoted:
+        if call[1][1][0].kind == nnkIntLit:
+          # The first number is an integer
+          if call[1][1][1].kind == nnkIntLit:
+            # The second number is a integer
+            result.add(newCall(
+              newDotExpr(
+                newIdentNode(typeName.strVal),
+                newIdentNode("cirq_createQbitGrid")
+              ),
+              newIdentNode(call[1][0][0].strVal),
+              newIntLitNode(call[1][1][0].intVal),
+              newIntLitNode(call[1][1][1].intVal)
+            ))
+          else:
+            # The second number is not an integer
+            result.add(newCall(
+              newDotExpr(
+                newIdentNode(typeName.strVal),
+                newIdentNode("cirq_createQbitGrid")
+              ),
+              newIdentNode(call[1][0][0].strVal),
+              newIntLitNode(call[1][1][0].intVal),
+              newIdentNode(call[1][1][1].strVal)
+            ))
+        else:
+          # The first number is not an int
+          if call[1][1][1].kind == nnkIntLit:
+            # The second number is a integer
+            result.add(newCall(
+              newDotExpr(
+                newIdentNode(typeName.strVal),
+                newIdentNode("cirq_createQbitGrid")
+              ),
+              newIdentNode(call[1][0][0].strVal),
+              newIdentNode(call[1][1][0].strVal),
+              newIntLitNode(call[1][1][1].intVal)
+            ))
+          else:
+            # The second number is not an integer
+            result.add(newCall(
+              newDotExpr(
+                newIdentNode(typeName.strVal),
+                newIdentNode("cirq_createQbitGrid")
+              ),
+              newIdentNode(call[1][0][0].strVal),
+              newIdentNode(call[1][1][0].strVal),
+              newIdentNode(call[1][1][1].strVal)
+            ))
+      else:
+        if call[1][1][0].kind == nnkIntLit:
+          # The first number is an integer
+          if call[1][1][1].kind == nnkIntLit:
+            # The second number is a integer
+            result.add(newCall(
+              newDotExpr(
+                newIdentNode(typeName.strVal),
+                newIdentNode("cirq_createQbitGrid")
+              ),
+              newStrLitNode(call[1][0].strVal),
+              newIntLitNode(call[1][1][0].intVal),
+              newIntLitNode(call[1][1][1].intVal)
+            ))
+          else:
+            # The second number is not an integer
+            result.add(newCall(
+              newDotExpr(
+                newIdentNode(typeName.strVal),
+                newIdentNode("cirq_createQbitGrid")
+              ),
+              newStrLitNode(call[1][0].strVal),
+              newIntLitNode(call[1][1][0].intVal),
+              newIdentNode(call[1][1][1].strVal)
+            ))
+        else:
+          # The first number is not an int
+          if call[1][1][1].kind == nnkIntLit:
+            # The second number is a integer
+            result.add(newCall(
+              newDotExpr(
+                newIdentNode(typeName.strVal),
+                newIdentNode("cirq_createQbitGrid")
+              ),
+              newStrLitNode(call[1][0].strVal),
+              newIdentNode(call[1][1][0].strVal),
+              newIntLitNode(call[1][1][1].intVal)
+            ))
+          else:
+            # The second number is not an integer
+            result.add(newCall(
+              newDotExpr(
+                newIdentNode(typeName.strVal),
+                newIdentNode("cirq_createQbitGrid")
+              ),
+              newStrLitNode(call[1][0].strVal),
+            newIdentNode(call[1][1][0].strVal),
+              newIdentNode(call[1][1][1].strVal)
+            ))
     # Hadamard gates
     elif $call[0] == "H":
-      result.add(newCall(
-        newDotExpr(
-          newIdentNode(typeName.strVal),
-          newIdentNode("cirq_H")
-        ),
-        newStrLitNode($call[1])
-      ))
-    # NOT GATES
+      if call[1].kind == nnkAccQuoted:
+        # Take the value as an Ident $call[1][0] is the name
+        result.add(newCall(
+          newDotExpr(
+            newIdentNode(typeName.strVal),
+            newIdentNode("cirq_H")
+          ),
+          newIdentNode($call[1])
+          ))
+      else:
+        result.add(newCall(
+          newDotExpr(
+            newIdentNode(typeName.strVal),
+            newIdentNode("cirq_H")
+          ),
+          newStrLitNode($call[1])
+        ))
+        # NOT GATES
     elif $call[0] == "X":
+       # Here I need to add support for the 'magic' calls of python for things like cirq_X(qubit)**0.5 -> squareroot of a gate
+      #for subcall in call[1]:
+      #  echo call[1][1].floatVal
+      # check if the type of call[1] is of type command
+      if call[1].kind == nnkCommand:
+        # Here we can address python ** magic
+        # Support the new ` ` convetion
+        # Overload the cirq_X proc
+        # Need to get the FloatLitVal as it can be passed as an identitfer arg or a floatval directly
+        # I could use var x:float and use this to convert the value to floatLit or just have two expansions and since its in compile time Im going to do the long code
+        if call[1][0].kind == nnkAccQuoted: # Identifier is call[1][0][0]
+          if call[1][1].kind == nnkFloatLit:
+            #echo "float addressed"
+            result.add(newCall(
+              newDotExpr(
+                newIdentNode(typeName.strVal),
+                newIdentNode("cirq_X")
+              ),
+              newIdentNode(call[1][0][0].strVal),
+              newFloatLitNode(call[1][1].floatVal)
+            ))
+          else: # it is an ident and needs to be converted to a float
+            result.add(newCall(
+              newDotExpr(
+                newIdentNode(typeName.strVal),
+                newIdentNode("cirq_X")
+              ),
+              newIdentNode(call[1][0][0].strVal),
+              newIdentNode(call[1][1].strVal) # Make it an Ident node insteads as its passed as a var
+            ))
+            #circuitHelper(result, call[1][1]
+        else:
+          if call[1][1].kind == nnkFloatLit:
+            #echo "float addressed"
+            result.add(newCall(
+              newDotExpr(
+                newIdentNode(typeName.strVal),
+                newIdentNode("cirq_X")
+              ),
+              newStrLitNode(call[1][0].strVal),
+              newFloatLitNode(call[1][1].floatVal)
+            ))
+          else: # it is an ident and needs to be converted to a float
+            result.add(newCall(
+              newDotExpr(
+                newIdentNode(typeName.strVal),
+                newIdentNode("cirq_X")
+              ),
+              newStrLitNode(call[1][0].strVal),
+              newIdentNode(call[1][1].strVal) # Make it an Ident node insteads as its passed as a var
+            ))
+            #circuitHelper(result, call[1][1])
+      else:
+        if call[1].kind == nnkAccQuoted:
+          result.add(newCall(
+            newDotExpr(
+              newIdentNode(typeName.strVal),
+              newIdentNode("cirq_X")
+            ),
+            newIdentNode($call[1])
+          ))
+        else:
+          result.add(newCall(
+            newDotExpr(
+              newIdentNode(typeName.strVal),
+              newIdentNode("cirq_X")
+            ),
+            newStrLitNode($call[1])
+          ))
+    # Y rotation
+    elif $call[0] == "Y":
       # Here I need to add support for the 'magic' calls of python for things like cirq_X(qubit)**0.5 -> squareroot of a gate
       #for subcall in call[1]:
       #  echo call[1][1].floatVal
       # check if the type of call[1] is of type command
       if call[1].kind == nnkCommand:
         # Here we can address python ** magic
+        # Support the new ` ` convetion
         # Overload the cirq_X proc
         # Need to get the FloatLitVal as it can be passed as an identitfer arg or a floatval directly
         # I could use var x:float and use this to convert the value to floatLit or just have two expansions and since its in compile time Im going to do the long code
-        if call[1][1].kind == nnkFloatLit:
-          #echo "float addressed"
-          result.add(newCall(
-            newDotExpr(
-              newIdentNode(typeName.strVal),
-              newIdentNode("cirq_X")
-            ),
-            newStrLitNode(call[1][0].strVal),
-            newFloatLitNode(call[1][1].floatVal)
-          ))
-        else: # it is an ident and needs to be converted to a float
-          result.add(newCall(
-            newDotExpr(
-              newIdentNode(typeName.strVal),
-              newIdentNode("cirq_X")
-            ),
-            newStrLitNode(call[1][0].strVal),
-            newIdentNode(call[1][1].strVal) # Make it an Ident node insteads as its passed as a var
-          ))
-          #circuitHelper(result, call[1][1])
+        if call[1][0].kind == nnkAccQuoted: # Identifier is call[1][0][0]
+          if call[1][1].kind == nnkFloatLit:
+            #echo "float addressed"
+            result.add(newCall(
+              newDotExpr(
+                newIdentNode(typeName.strVal),
+                newIdentNode("cirq_Y")
+              ),
+              newIdentNode(call[1][0][0].strVal),
+              newFloatLitNode(call[1][1].floatVal)
+            ))
+          else: # it is an ident and needs to be converted to a float
+            result.add(newCall(
+              newDotExpr(
+                newIdentNode(typeName.strVal),
+                newIdentNode("cirq_Y")
+              ),
+              newIdentNode(call[1][0][0].strVal),
+              newIdentNode(call[1][1].strVal) # Make it an Ident node insteads as its passed as a var
+            ))
+            #circuitHelper(result, call[1][1]
+        else:
+          if call[1][1].kind == nnkFloatLit:
+            #echo "float addressed"
+            result.add(newCall(
+              newDotExpr(
+                newIdentNode(typeName.strVal),
+                newIdentNode("cirq_Y")
+              ),
+              newStrLitNode(call[1][0].strVal),
+              newFloatLitNode(call[1][1].floatVal)
+            ))
+          else: # it is an ident and needs to be converted to a float
+            result.add(newCall(
+              newDotExpr(
+                newIdentNode(typeName.strVal),
+                newIdentNode("cirq_Y")
+              ),
+              newStrLitNode(call[1][0].strVal),
+              newIdentNode(call[1][1].strVal) # Make it an Ident node insteads as its passed as a var
+            ))
+            #circuitHelper(result, call[1][1])
       else:
-        result.add(newCall(
-          newDotExpr(
-            newIdentNode(typeName.strVal),
-            newIdentNode("cirq_X")
-          ),
-          newStrLitNode($call[1])
-        ))
-    # Y rotation
-    elif $call[0] == "Y":
-      if call[1].kind == nnkCommand:
-        if call[1][1].kind == nnkFloatLit:
+        if call[1].kind == nnkAccQuoted:
           result.add(newCall(
             newDotExpr(
               newIdentNode(typeName.strVal),
               newIdentNode("cirq_Y")
             ),
-            newStrLitNode(call[1][0].strVal),
-            newFloatLitNode(call[1][1].floatVal)
+            newIdentNode($call[1])
           ))
         else:
           result.add(newCall(
@@ -465,28 +816,70 @@ macro Circuit*(typeName: typed,  fieldsof: untyped): untyped =
               newIdentNode(typeName.strVal),
               newIdentNode("cirq_Y")
             ),
-            newStrLitNode(call[1][0].strVal),
-            newIdentNode(call[1][1].strVal) # Make it an Ident node insteads as its passed as a var
+            newStrLitNode($call[1])
           ))
-      else:
-        result.add(newCall(
-          newDotExpr(
-            newIdentNode(typeName.strVal),
-            newIdentNode("cirq_Y")
-          ),
-          newStrLitNode($call[1])
-        ))
     # 180 rotation Z 
     elif $call[0] == "Z":
+ # Here I need to add support for the 'magic' calls of python for things like cirq_X(qubit)**0.5 -> squareroot of a gate
+      #for subcall in call[1]:
+      #  echo call[1][1].floatVal
+      # check if the type of call[1] is of type command
       if call[1].kind == nnkCommand:
-        if call[1][1].kind == nnkFloatLit:
+        # Here we can address python ** magic
+        # Support the new ` ` convetion
+        # Overload the cirq_X proc
+        # Need to get the FloatLitVal as it can be passed as an identitfer arg or a floatval directly
+        # I could use var x:float and use this to convert the value to floatLit or just have two expansions and since its in compile time Im going to do the long code
+        if call[1][0].kind == nnkAccQuoted: # Identifier is call[1][0][0]
+          if call[1][1].kind == nnkFloatLit:
+            #echo "float addressed"
+            result.add(newCall(
+              newDotExpr(
+                newIdentNode(typeName.strVal),
+                newIdentNode("cirq_Z")
+              ),
+              newIdentNode(call[1][0][0].strVal),
+              newFloatLitNode(call[1][1].floatVal)
+            ))
+          else: # it is an ident and needs to be converted to a float
+            result.add(newCall(
+              newDotExpr(
+                newIdentNode(typeName.strVal),
+                newIdentNode("cirq_Z")
+              ),
+              newIdentNode(call[1][0][0].strVal),
+              newIdentNode(call[1][1].strVal) # Make it an Ident node insteads as its passed as a var
+            ))
+            #circuitHelper(result, call[1][1]
+        else:
+          if call[1][1].kind == nnkFloatLit:
+            #echo "float addressed"
+            result.add(newCall(
+              newDotExpr(
+                newIdentNode(typeName.strVal),
+                newIdentNode("cirq_Z")
+              ),
+              newStrLitNode(call[1][0].strVal),
+              newFloatLitNode(call[1][1].floatVal)
+            ))
+          else: # it is an ident and needs to be converted to a float
+            result.add(newCall(
+              newDotExpr(
+                newIdentNode(typeName.strVal),
+                newIdentNode("cirq_Z")
+              ),
+              newStrLitNode(call[1][0].strVal),
+              newIdentNode(call[1][1].strVal) # Make it an Ident node insteads as its passed as a var
+            ))
+            #circuitHelper(result, call[1][1])
+      else:
+        if call[1].kind == nnkAccQuoted:
           result.add(newCall(
             newDotExpr(
               newIdentNode(typeName.strVal),
               newIdentNode("cirq_Z")
             ),
-            newStrLitNode(call[1][0].strVal),
-            newFloatLitNode(call[1][1].floatVal)
+            newIdentNode($call[1])
           ))
         else:
           result.add(newCall(
@@ -494,17 +887,8 @@ macro Circuit*(typeName: typed,  fieldsof: untyped): untyped =
               newIdentNode(typeName.strVal),
               newIdentNode("cirq_Z")
             ),
-            newStrLitNode(call[1][0].strVal),
-            newIdentNode(call[1][1].strVal) # Make it an Ident node insteads as its passed as a var
-          ))        
-      else:
-        result.add(newCall(
-          newDotExpr(
-            newIdentNode(typeName.strVal),
-            newIdentNode("cirq_Z") 
-          ),
-          newStrLitNode($call[1])
-        ))
+            newStrLitNode($call[1])
+          ))
     # Controllled nots
     elif $call[0] == "CNOT":
       # Then this is a nested command structure
@@ -514,41 +898,500 @@ macro Circuit*(typeName: typed,  fieldsof: untyped): untyped =
       for subcall in call[1]:
         listofCalls.add(subcall.strVal)
       ]#
-      result.add(newCall(
-        newDotExpr(
-          newIdentNode(typeName.strVal),
-          newIdentNode("cirq_CNOT")
-        ),
-        newStrLitNode($call[1][0].strVal),
-        newStrLitNode($call[1][1].strVal)
-      ))
+      # Now support the Magic CNOT
+      # call[1] will always be a command
+      # call[1][0] will be arg 1
+      # call[1][1] will be another command or a identifer
+      # Adding in identifer support is just a nightmare I was thinking of making a generator for this code in another macro but I have done so much of it by hand already so...
+      if call[1][0].kind == nnkAccQuoted:
+      # The first var is a ident-------------------------------------------------------------------------------------------------------------------------------------------- Ident
+        if call[1][1].kind == nnkCommand:
+        # we have a magic command
+        # call[1][1][0] is the second identifer
+        # call[1][1][1] is a float lit or and identifer if its passed as a var
+          if call[1][1][0].kind == nnkAccQuoted:
+          # The second var is a varaible
+            if call[1][1][1].kind == nnkFloatLit:
+            # The magic value is a floatlit
+            # Not magic standard call of CNOT
+              result.add(newCall(
+                newDotExpr(
+                  newIdentNode(typeName.strVal),
+                  newIdentNode("cirq_CNOT")
+                ),
+                newIdentNode($call[1][0][0].strVal),
+                newIdentNode($call[1][1][0][0].strVal),
+                newFloatLitNode(call[1][1][1].floatVal)
+              ))
+            else:
+            # The magic value is an identifer
+              result.add(newCall(
+                newDotExpr(
+                  newIdentNode(typeName.strVal),
+                  newIdentNode("cirq_CNOT")
+                ),
+                newIdentNode($call[1][0][0].strVal),
+                newIdentNode($call[1][1][0][0].strVal),
+                newIdentNode(call[1][1][1].strVal)
+              ))
+          else:
+          # The second var is not a varible
+            if call[1][1][1].kind == nnkFloatLit:
+              # The magic value is a floatlit
+              # Not magic standard call of CNOT
+              result.add(newCall(
+                newDotExpr(
+                  newIdentNode(typeName.strVal),
+                  newIdentNode("cirq_CNOT")
+                ),
+                newIdentNode($call[1][0][0].strVal),
+                newStrLitNode($call[1][1][0].strVal),
+                newFloatLitNode(call[1][1][1].floatVal)
+              ))
+            else:
+              # The magic value is an identifer
+              result.add(newCall(
+                newDotExpr(
+                  newIdentNode(typeName.strVal),
+                  newIdentNode("cirq_CNOT")
+                ),
+                newIdentNode($call[1][0][0].strVal),
+                newStrLitNode($call[1][1][0].strVal),
+                newIdentNode(call[1][1][1].strVal)
+              ))
+        else:
+        # Not a magic command
+          if call[1][1].kind == nnkAccQuoted:
+          # The second var is a varaible
+            result.add(newCall(
+              newDotExpr(
+                newIdentNode(typeName.strVal),
+                newIdentNode("cirq_CNOT")
+              ),
+              newIdentNode($call[1][0][0].strVal),
+              newIdentNode($call[1][1][0].strVal)
+            ))
+          else:
+          # The second var is not a varible
+              result.add(newCall(
+                newDotExpr(
+                  newIdentNode(typeName.strVal),
+                  newIdentNode("cirq_CNOT")
+                ),
+                newIdentNode($call[1][0][0].strVal),
+                newStrLitNode($call[1][1].strVal)
+              ))
+      else:
+      # The first var is not an ident--------------------------------------------------------------------------------------------------- NOT IDENT
+        if call[1][1].kind == nnkCommand:
+        # we have a magic command
+        # call[1][1][0] is the second identifer
+        # call[1][1][1] is a float lit or and identifer if its passed as a var
+          if call[1][1][0].kind == nnkAccQuoted:
+          # The second var is a varaible
+            if call[1][1][1].kind == nnkFloatLit:
+            # The magic value is a floatlit
+            # Not magic standard call of CNOT
+              result.add(newCall(
+                newDotExpr(
+                  newIdentNode(typeName.strVal),
+                  newIdentNode("cirq_CNOT")
+                ),
+                newStrLitNode($call[1][0].strVal),
+                newIdentNode($call[1][1][0][0].strVal),
+                newFloatLitNode(call[1][1][1].floatVal)
+              ))
+            else:
+            # The magic value is an identifer
+              result.add(newCall(
+                newDotExpr(
+                  newIdentNode(typeName.strVal),
+                  newIdentNode("cirq_CNOT")
+                ),
+                newStrLitNode($call[1][0].strVal),
+                newIdentNode($call[1][1][0][0].strVal),
+                newIdentNode(call[1][1][1].strVal)
+              ))
+          else:
+          # The second var is not a varible
+            if call[1][1][1].kind == nnkFloatLit:
+              # The magic value is a floatlit
+              # Not magic standard call of CNOT
+              result.add(newCall(
+                newDotExpr(
+                  newIdentNode(typeName.strVal),
+                  newIdentNode("cirq_CNOT")
+                ),
+                newStrLitNode($call[1][0].strVal),
+                newStrLitNode($call[1][1][0].strVal),
+                newFloatLitNode(call[1][1][1].floatVal)
+              ))
+            else:
+              # The magic value is an identifer
+              result.add(newCall(
+                newDotExpr(
+                  newIdentNode(typeName.strVal),
+                  newIdentNode("cirq_CNOT")
+                ),
+                newStrLitNode($call[1][0].strVal),
+                newStrLitNode($call[1][1][0].strVal),
+                newIdentNode(call[1][1][1].strVal)
+              ))
+        else:
+        # Not a magic command
+          if call[1][1].kind == nnkAccQuoted:
+          # The second var is a varaible
+            result.add(newCall(
+              newDotExpr(
+                newIdentNode(typeName.strVal),
+                newIdentNode("cirq_CNOT")
+              ),
+              newStrLitNode($call[1][0].strVal),
+              newIdentNode($call[1][1][0].strVal)
+            ))
+          else:
+          # The second var is not a varible
+              result.add(newCall(
+                newDotExpr(
+                  newIdentNode(typeName.strVal),
+                  newIdentNode("cirq_CNOT")
+                ),
+                newStrLitNode($call[1][0].strVal),
+                newStrLitNode($call[1][1].strVal)
+              ))
     elif $call[0] == "SWAP":
-      result.add(newCall(
-        newDotExpr(
-          newIdentNode(typeName.strVal),
-          newIdentNode("cirq_SWAP")
-        ),
-        newStrLitNode($call[1][0].strVal),
-        newStrLitNode($call[1][1].strVal)
-      ))
+      if call[1][0].kind == nnkAccQuoted:
+      # The first var is a ident-------------------------------------------------------------------------------------------------------------------------------------------- Ident
+        if call[1][1].kind == nnkCommand:
+        # we have a magic command
+        # call[1][1][0] is the second identifer
+        # call[1][1][1] is a float lit or and identifer if its passed as a var
+          if call[1][1][0].kind == nnkAccQuoted:
+          # The second var is a varaible
+            if call[1][1][1].kind == nnkFloatLit:
+            # The magic value is a floatlit
+            # Not magic standard call of CNOT
+              result.add(newCall(
+                newDotExpr(
+                  newIdentNode(typeName.strVal),
+                  newIdentNode("cirq_SWAP")
+                ),
+                newIdentNode($call[1][0][0].strVal),
+                newIdentNode($call[1][1][0][0].strVal),
+                newFloatLitNode(call[1][1][1].floatVal)
+              ))
+            else:
+            # The magic value is an identifer
+              result.add(newCall(
+                newDotExpr(
+                  newIdentNode(typeName.strVal),
+                  newIdentNode("cirq_SWAP")
+                ),
+                newIdentNode($call[1][0][0].strVal),
+                newIdentNode($call[1][1][0][0].strVal),
+                newIdentNode(call[1][1][1].strVal)
+              ))
+          else:
+          # The second var is not a varible
+            if call[1][1][1].kind == nnkFloatLit:
+              # The magic value is a floatlit
+              # Not magic standard call of CNOT
+              result.add(newCall(
+                newDotExpr(
+                  newIdentNode(typeName.strVal),
+                  newIdentNode("cirq_SWAP")
+                ),
+                newIdentNode($call[1][0][0].strVal),
+                newStrLitNode($call[1][1][0].strVal),
+                newFloatLitNode(call[1][1][1].floatVal)
+              ))
+            else:
+              # The magic value is an identifer
+              result.add(newCall(
+                newDotExpr(
+                  newIdentNode(typeName.strVal),
+                  newIdentNode("cirq_SWAP")
+                ),
+                newIdentNode($call[1][0][0].strVal),
+                newStrLitNode($call[1][1][0].strVal),
+                newIdentNode(call[1][1][1].strVal)
+              ))
+        else:
+        # Not a magic command
+          if call[1][1].kind == nnkAccQuoted:
+          # The second var is a varaible
+            result.add(newCall(
+              newDotExpr(
+                newIdentNode(typeName.strVal),
+                newIdentNode("cirq_SWAP")
+              ),
+              newIdentNode($call[1][0][0].strVal),
+              newIdentNode($call[1][1][0].strVal)
+            ))
+          else:
+          # The second var is not a varible
+              result.add(newCall(
+                newDotExpr(
+                  newIdentNode(typeName.strVal),
+                  newIdentNode("cirq_SWAP")
+                ),
+                newIdentNode($call[1][0][0].strVal),
+                newStrLitNode($call[1][1].strVal)
+              ))
+      else:
+      # The first var is not an ident--------------------------------------------------------------------------------------------------- NOT IDENT
+        if call[1][1].kind == nnkCommand:
+        # we have a magic command
+        # call[1][1][0] is the second identifer
+        # call[1][1][1] is a float lit or and identifer if its passed as a var
+          if call[1][1][0].kind == nnkAccQuoted:
+          # The second var is a varaible
+            if call[1][1][1].kind == nnkFloatLit:
+            # The magic value is a floatlit
+            # Not magic standard call of CNOT
+              result.add(newCall(
+                newDotExpr(
+                  newIdentNode(typeName.strVal),
+                  newIdentNode("cirq_SWAP")
+                ),
+                newStrLitNode($call[1][0].strVal),
+                newIdentNode($call[1][1][0][0].strVal),
+                newFloatLitNode(call[1][1][1].floatVal)
+              ))
+            else:
+            # The magic value is an identifer
+              result.add(newCall(
+                newDotExpr(
+                  newIdentNode(typeName.strVal),
+                  newIdentNode("cirq_SWAP")
+                ),
+                newStrLitNode($call[1][0].strVal),
+                newIdentNode($call[1][1][0][0].strVal),
+                newIdentNode(call[1][1][1].strVal)
+              ))
+          else:
+          # The second var is not a varible
+            if call[1][1][1].kind == nnkFloatLit:
+              # The magic value is a floatlit
+              # Not magic standard call of CNOT
+              result.add(newCall(
+                newDotExpr(
+                  newIdentNode(typeName.strVal),
+                  newIdentNode("cirq_SWAP")
+                ),
+                newStrLitNode($call[1][0].strVal),
+                newStrLitNode($call[1][1][0].strVal),
+                newFloatLitNode(call[1][1][1].floatVal)
+              ))
+            else:
+              # The magic value is an identifer
+              result.add(newCall(
+                newDotExpr(
+                  newIdentNode(typeName.strVal),
+                  newIdentNode("cirq_SWAP")
+                ),
+                newStrLitNode($call[1][0].strVal),
+                newStrLitNode($call[1][1][0].strVal),
+                newIdentNode(call[1][1][1].strVal)
+              ))
+        else:
+        # Not a magic command
+          if call[1][1].kind == nnkAccQuoted:
+          # The second var is a varaible
+            result.add(newCall(
+              newDotExpr(
+                newIdentNode(typeName.strVal),
+                newIdentNode("cirq_SWAP")
+              ),
+              newStrLitNode($call[1][0].strVal),
+              newIdentNode($call[1][1][0].strVal)
+            ))
+          else:
+          # The second var is not a varible
+              result.add(newCall(
+                newDotExpr(
+                  newIdentNode(typeName.strVal),
+                  newIdentNode("cirq_SWAP")
+                ),
+                newStrLitNode($call[1][0].strVal),
+                newStrLitNode($call[1][1].strVal)
+              ))
     elif $call[0] == "CZ":
-      result.add(newCall(
-        newDotExpr(
-          newIdentNode(typeName.strVal),
-          newIdentNode("cirq_CZ")
-        ),
-        newStrLitNode($call[1][0].strVal),
-        newStrLitNode($call[1][1].strVal)
-      ))
+      if call[1][0].kind == nnkAccQuoted:
+      # The first var is a ident-------------------------------------------------------------------------------------------------------------------------------------------- Ident
+        if call[1][1].kind == nnkCommand:
+        # we have a magic command
+        # call[1][1][0] is the second identifer
+        # call[1][1][1] is a float lit or and identifer if its passed as a var
+          if call[1][1][0].kind == nnkAccQuoted:
+          # The second var is a varaible
+            if call[1][1][1].kind == nnkFloatLit:
+            # The magic value is a floatlit
+            # Not magic standard call of CNOT
+              result.add(newCall(
+                newDotExpr(
+                  newIdentNode(typeName.strVal),
+                  newIdentNode("cirq_CZ")
+                ),
+                newIdentNode($call[1][0][0].strVal),
+                newIdentNode($call[1][1][0][0].strVal),
+                newFloatLitNode(call[1][1][1].floatVal)
+              ))
+            else:
+            # The magic value is an identifer
+              result.add(newCall(
+                newDotExpr(
+                  newIdentNode(typeName.strVal),
+                  newIdentNode("cirq_CZ")
+                ),
+                newIdentNode($call[1][0][0].strVal),
+                newIdentNode($call[1][1][0][0].strVal),
+                newIdentNode(call[1][1][1].strVal)
+              ))
+          else:
+          # The second var is not a varible
+            if call[1][1][1].kind == nnkFloatLit:
+              # The magic value is a floatlit
+              # Not magic standard call of CNOT
+              result.add(newCall(
+                newDotExpr(
+                  newIdentNode(typeName.strVal),
+                  newIdentNode("cirq_CZ")
+                ),
+                newIdentNode($call[1][0][0].strVal),
+                newStrLitNode($call[1][1][0].strVal),
+                newFloatLitNode(call[1][1][1].floatVal)
+              ))
+            else:
+              # The magic value is an identifer
+              result.add(newCall(
+                newDotExpr(
+                  newIdentNode(typeName.strVal),
+                  newIdentNode("cirq_CZ")
+                ),
+                newIdentNode($call[1][0][0].strVal),
+                newStrLitNode($call[1][1][0].strVal),
+                newIdentNode(call[1][1][1].strVal)
+              ))
+        else:
+        # Not a magic command
+          if call[1][1].kind == nnkAccQuoted:
+          # The second var is a varaible
+            result.add(newCall(
+              newDotExpr(
+                newIdentNode(typeName.strVal),
+                newIdentNode("cirq_CZ")
+              ),
+              newIdentNode($call[1][0][0].strVal),
+              newIdentNode($call[1][1][0].strVal)
+            ))
+          else:
+          # The second var is not a varible
+              result.add(newCall(
+                newDotExpr(
+                  newIdentNode(typeName.strVal),
+                  newIdentNode("cirq_CZ")
+                ),
+                newIdentNode($call[1][0][0].strVal),
+                newStrLitNode($call[1][1].strVal)
+              ))
+      else:
+      # The first var is not an ident--------------------------------------------------------------------------------------------------- NOT IDENT
+        if call[1][1].kind == nnkCommand:
+        # we have a magic command
+        # call[1][1][0] is the second identifer
+        # call[1][1][1] is a float lit or and identifer if its passed as a var
+          if call[1][1][0].kind == nnkAccQuoted:
+          # The second var is a varaible
+            if call[1][1][1].kind == nnkFloatLit:
+            # The magic value is a floatlit
+            # Not magic standard call of CNOT
+              result.add(newCall(
+                newDotExpr(
+                  newIdentNode(typeName.strVal),
+                  newIdentNode("cirq_CZ")
+                ),
+                newStrLitNode($call[1][0].strVal),
+                newIdentNode($call[1][1][0][0].strVal),
+                newFloatLitNode(call[1][1][1].floatVal)
+              ))
+            else:
+            # The magic value is an identifer
+              result.add(newCall(
+                newDotExpr(
+                  newIdentNode(typeName.strVal),
+                  newIdentNode("cirq_CZ")
+                ),
+                newStrLitNode($call[1][0].strVal),
+                newIdentNode($call[1][1][0][0].strVal),
+                newIdentNode(call[1][1][1].strVal)
+              ))
+          else:
+          # The second var is not a varible
+            if call[1][1][1].kind == nnkFloatLit:
+              # The magic value is a floatlit
+              # Not magic standard call of CNOT
+              result.add(newCall(
+                newDotExpr(
+                  newIdentNode(typeName.strVal),
+                  newIdentNode("cirq_CZ")
+                ),
+                newStrLitNode($call[1][0].strVal),
+                newStrLitNode($call[1][1][0].strVal),
+                newFloatLitNode(call[1][1][1].floatVal)
+              ))
+            else:
+              # The magic value is an identifer
+              result.add(newCall(
+                newDotExpr(
+                  newIdentNode(typeName.strVal),
+                  newIdentNode("cirq_CZ")
+                ),
+                newStrLitNode($call[1][0].strVal),
+                newStrLitNode($call[1][1][0].strVal),
+                newIdentNode(call[1][1][1].strVal)
+              ))
+        else:
+        # Not a magic command
+          if call[1][1].kind == nnkAccQuoted:
+          # The second var is a varaible
+            result.add(newCall(
+              newDotExpr(
+                newIdentNode(typeName.strVal),
+                newIdentNode("cirq_CZ")
+              ),
+              newStrLitNode($call[1][0].strVal),
+              newIdentNode($call[1][1][0].strVal)
+            ))
+          else:
+          # The second var is not a varible
+              result.add(newCall(
+                newDotExpr(
+                  newIdentNode(typeName.strVal),
+                  newIdentNode("cirq_CZ")
+                ),
+                newStrLitNode($call[1][0].strVal),
+                newStrLitNode($call[1][1].strVal)
+              ))
     # Measure Gate
     elif $call[0] == "Measure":
-      result.add(newCall(
-        newDotExpr(
-          newIdentNode(typeName.strVal),
-          newIdentNode("cirq_Measure")
-        ),
-        newStrLitNode($call[1])
-      ))
+      if call[1].kind == nnkAccQuoted:
+        # Take the value as an Ident $call[1][0] is the name
+        result.add(newCall(
+          newDotExpr(
+            newIdentNode(typeName.strVal),
+            newIdentNode("cirq_Measure")
+          ),
+          newIdentNode($call[1])
+        ))
+      else:
+        result.add(newCall(
+          newDotExpr(
+            newIdentNode(typeName.strVal),
+            newIdentNode("cirq_Measure")
+          ),
+          newStrLitNode($call[1])
+        ))
     #[ I want to avoid this syntax but I am not good enough with macros yet
     elif $call[0] == "Bloch":
       # We are doing a possible multiple bloch call
@@ -557,3 +1400,4 @@ macro Circuit*(typeName: typed,  fieldsof: untyped): untyped =
         if not index == 0:
           # Then its the call and we need to add the Bloch results call
     ]#
+
